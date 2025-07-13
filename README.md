@@ -1,0 +1,2 @@
+# wex
+LLM coding tool
