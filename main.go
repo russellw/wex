@@ -16,9 +16,10 @@ import (
 )
 
 type Engine struct {
-	ollamaURL string
-	model     string
-	workspace string
+	ollamaURL    string
+	model        string
+	workspace    string
+	systemPrompt string
 }
 
 type Message struct {
@@ -91,6 +92,12 @@ func NewEngine(ollamaURL, model, workspace string) (*Engine, error) {
 	} else {
 		engine.model = model
 	}
+
+	systemPromptBytes, err := os.ReadFile("system_prompt.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read system_prompt.txt: %v", err)
+	}
+	engine.systemPrompt = string(systemPromptBytes)
 
 	return engine, nil
 }
@@ -292,6 +299,7 @@ func (e *Engine) sendChatRequest(messages []Message) (*ChatResponse, error) {
 
 func (e *Engine) ProcessRequest(userMessage string) error {
 	messages := []Message{
+		{Role: "system", Content: e.systemPrompt},
 		{Role: "user", Content: userMessage},
 	}
 
