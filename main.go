@@ -68,12 +68,55 @@ type ToolResult struct {
 	Content    string `json:"content"`
 }
 
-func NewEngine(ollamaURL, model, workspace string) *Engine {
-	return &Engine{
+type Model struct {
+	Name string `json:"name"`
+}
+
+type ModelsResponse struct {
+	Models []Model `json:"models"`
+}
+
+func NewEngine(ollamaURL, model, workspace string) (*Engine, error) {
+	engine := &Engine{
 		ollamaURL: ollamaURL,
-		model:     model,
 		workspace: workspace,
 	}
+
+	if model == "" {
+		firstModel, err := engine.getFirstAvailableModel()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get available model: %v", err)
+		}
+		engine.model = firstModel
+	} else {
+		engine.model = model
+	}
+
+	return engine, nil
+}
+
+func (e *Engine) getFirstAvailableModel() (string, error) {
+	resp, err := http.Get(e.ollamaURL + "/api/tags")
+	if err != nil {
+		return "", fmt.Errorf("failed to get models: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var modelsResp ModelsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&modelsResp); err != nil {
+		return "", fmt.Errorf("failed to decode models response: %v", err)
+	}
+
+	if len(modelsResp.Models) == 0 {
+		return "", fmt.Errorf("no models available on Ollama server")
+	}
+
+	return modelsResp.Models[0].Name, nil
 }
 
 func (e *Engine) getTools() []Tool {
@@ -298,16 +341,18 @@ func main() {
 	}
 
 	model := os.Getenv("OLLAMA_MODEL")
-	if model == "" {
-		model = "llama3.2"
-	}
 
 	workspace := os.Getenv("WORKSPACE")
 	if workspace == "" {
 		workspace = "/workspace"
 	}
 
-	engine := NewEngine(ollamaURL, model, workspace)
+	engine, err := NewEngine(ollamaURL, model, workspace)
+	if err != nil {
+		log.Fatalf("Failed to create engine: %v", err)
+	}
+
+	fmt.Printf("Using model: %s\n", engine.model)
 
 	if len(os.Args) < 2 {
 		log.Fatal("Usage: wex <message>")
