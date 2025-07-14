@@ -169,6 +169,7 @@ def main():
 Examples:
   python run_engine.py "Create a hello world program in Python"
   python run_engine.py --workspace /path/to/project "Add unit tests"
+  python run_engine.py --file prompt.txt  # Read message from file
   python run_engine.py --shell  # Interactive shell
   python run_engine.py --build  # Just build the image
         """
@@ -176,6 +177,8 @@ Examples:
     
     parser.add_argument("message", nargs="?", 
                        help="Message to send to the coding assistant")
+    parser.add_argument("--file", "-f",
+                       help="Read message from file instead of command line")
     parser.add_argument("--workspace", "-w", 
                        help="Path to workspace directory (default: current directory)")
     parser.add_argument("--ollama-url", 
@@ -205,11 +208,22 @@ Examples:
         success = engine.shell()
         sys.exit(0 if success else 1)
     
-    if not args.message:
-        parser.error("Message is required unless using --build or --shell")
+    # Get message from file or command line
+    message = None
+    if args.file:
+        try:
+            with open(args.file, 'r') as f:
+                message = f.read().strip()
+        except IOError as e:
+            print(f"Error reading file {args.file}: {e}")
+            sys.exit(1)
+    elif args.message:
+        message = args.message
+    else:
+        parser.error("Message is required (either as argument or --file) unless using --build or --shell")
     
     # Run the engine with the message
-    success = engine.run_engine(args.message)
+    success = engine.run_engine(message)
     sys.exit(0 if success else 1)
 
 
