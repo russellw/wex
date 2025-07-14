@@ -13,6 +13,7 @@ RUN apk --no-cache add ca-certificates git bash curl
 WORKDIR /root/
 
 COPY --from=builder /app/wex .
+COPY --from=builder /app/system_prompt.txt .
 
 ENV WORKSPACE=/workspace
 ENV OLLAMA_URL=http://192.168.0.63:11434
