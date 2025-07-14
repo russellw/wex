@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import shutil
 from pathlib import Path
+from datetime import datetime
 
 
 class WexEngine:
@@ -21,13 +22,18 @@ class WexEngine:
         self.container_name = "wex-engine"
         self.image_name = "wex:latest"
         
-    def build_image(self):
+    def build_image(self, force_rebuild=False):
         """Build the Docker image for the engine."""
         print("Building Docker image...")
         try:
-            result = subprocess.run([
-                "docker", "build", "-t", self.image_name, "."
-            ], cwd=Path(__file__).parent, check=True, capture_output=True, text=True)
+            cmd = ["docker", "build", "-t", self.image_name]
+            if force_rebuild:
+                cmd.append("--no-cache")
+            cmd.append(".")
+            
+            result = subprocess.run(
+                cmd, cwd=Path(__file__).parent, check=True, capture_output=True, text=True
+            )
             print("Docker image built successfully")
             return True
         except subprocess.CalledProcessError as e:
@@ -45,6 +51,94 @@ class WexEngine:
             return bool(result.stdout.strip())
         except subprocess.CalledProcessError:
             return False
+    
+    def get_image_timestamp(self):
+        """Get the creation timestamp of the Docker image."""
+        try:
+            # Try to get the image ID first to make sure we're getting the right image
+            result = subprocess.run([
+                "docker", "images", "-q", self.image_name
+            ], capture_output=True, text=True, check=True)
+            image_id = result.stdout.strip()
+            
+            if not image_id:
+                return None
+            
+            # Get the created timestamp using the image ID
+            result = subprocess.run([
+                "docker", "inspect", "-f", "{{.Created}}", image_id
+            ], capture_output=True, text=True, check=True)
+            timestamp_str = result.stdout.strip()
+            print(f"Raw Docker timestamp: {timestamp_str}")
+            
+            # Parse Docker's timestamp format and convert to UTC
+            if timestamp_str.endswith('Z'):
+                timestamp_str = timestamp_str[:-1] + '+00:00'
+            dt = datetime.fromisoformat(timestamp_str)
+            # Convert to local timezone for comparison
+            local_dt = dt.astimezone()
+            print(f"Converted image timestamp: {local_dt}")
+            return local_dt
+        except subprocess.CalledProcessError:
+            return None
+        except Exception as e:
+            print(f"Error parsing image timestamp: {e}")
+            return None
+    
+    def get_relevant_files(self):
+        """Get list of files that should trigger image rebuild."""
+        base_path = Path(__file__).parent
+        relevant_files = [
+            "main.go",
+            "go.mod",
+            "go.sum",
+            "Dockerfile",
+            "system_prompt.txt"
+        ]
+        
+        existing_files = []
+        for file_name in relevant_files:
+            file_path = base_path / file_name
+            if file_path.exists():
+                existing_files.append(file_path)
+        
+        return existing_files
+    
+    def needs_rebuild(self):
+        """Check if image needs to be rebuilt based on file timestamps."""
+        if not self.check_image_exists():
+            print("Image does not exist, rebuild needed")
+            return True
+        
+        image_timestamp = self.get_image_timestamp()
+        if image_timestamp is None:
+            print("Cannot get image timestamp, rebuild needed")
+            return True
+        
+        relevant_files = self.get_relevant_files()
+        newest_file = None
+        newest_time = None
+        
+        for file_path in relevant_files:
+            file_timestamp = datetime.fromtimestamp(file_path.stat().st_mtime)
+            # Convert to same timezone as image timestamp for comparison
+            file_timestamp = file_timestamp.astimezone()
+            
+            print(f"File {file_path.name}: {file_timestamp}")
+            
+            if newest_time is None or file_timestamp > newest_time:
+                newest_time = file_timestamp
+                newest_file = file_path.name
+            
+            # Add small buffer (2 seconds) to account for filesystem precision
+            if file_timestamp > image_timestamp:
+                time_diff = (file_timestamp - image_timestamp).total_seconds()
+                if time_diff > 2:  # Only rebuild if difference is > 2 seconds
+                    print(f"File {file_path.name} newer than image by {time_diff:.1f}s, rebuild needed")
+                    return True
+        
+        print(f"Image up to date (newest file: {newest_file})")
+        return False
     
     def stop_existing_container(self):
         """Stop and remove any existing container with the same name."""
@@ -69,10 +163,13 @@ class WexEngine:
         # Ensure workspace path is absolute
         workspace_path = os.path.abspath(self.workspace_path)
         
-        # Check if image exists, build if not
-        if not self.check_image_exists():
-            print(f"Docker image {self.image_name} not found")
-            if not self.build_image():
+        # Check if image needs rebuild
+        if self.needs_rebuild():
+            if not self.check_image_exists():
+                print(f"Docker image {self.image_name} not found")
+            else:
+                print(f"Source files newer than image, rebuilding...")
+            if not self.build_image(force_rebuild=True):
                 return False
         
         # Stop any existing container
@@ -125,10 +222,13 @@ class WexEngine:
         # Ensure workspace path is absolute
         workspace_path = os.path.abspath(self.workspace_path)
         
-        # Check if image exists, build if not
-        if not self.check_image_exists():
-            print(f"Docker image {self.image_name} not found")
-            if not self.build_image():
+        # Check if image needs rebuild
+        if self.needs_rebuild():
+            if not self.check_image_exists():
+                print(f"Docker image {self.image_name} not found")
+            else:
+                print(f"Source files newer than image, rebuilding...")
+            if not self.build_image(force_rebuild=True):
                 return False
         
         # Stop any existing container
