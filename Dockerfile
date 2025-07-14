@@ -17,7 +17,6 @@ COPY --from=builder /app/system_prompt.txt .
 
 ENV WORKSPACE=/workspace
 ENV OLLAMA_URL=http://192.168.0.63:11434
-ENV OLLAMA_MODEL=llama3.2
 
 VOLUME ["/workspace"]
 
