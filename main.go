@@ -309,6 +309,10 @@ func (e *Engine) ProcessRequest(userMessage string) error {
 			return fmt.Errorf("chat request failed: %v", err)
 		}
 
+		fmt.Printf("DEBUG: Response role: %s\n", resp.Message.Role)
+		fmt.Printf("DEBUG: Response content: %s\n", resp.Message.Content)
+		fmt.Printf("DEBUG: Tool calls count: %d\n", len(resp.Message.ToolCalls))
+
 		messages = append(messages, Message{
 			Role:    resp.Message.Role,
 			Content: resp.Message.Content,
@@ -316,6 +320,45 @@ func (e *Engine) ProcessRequest(userMessage string) error {
 
 		if resp.Message.Content != "" {
 			fmt.Printf("Assistant: %s\n", resp.Message.Content)
+			
+			// Check if content looks like a JSON tool call
+			if strings.Contains(resp.Message.Content, `"name":`) && strings.Contains(resp.Message.Content, `"arguments":`) {
+				// Try to parse as tool call JSON
+				var toolCallJson struct {
+					Name      string          `json:"name"`
+					Arguments json.RawMessage `json:"arguments"`
+				}
+				
+				if err := json.Unmarshal([]byte(resp.Message.Content), &toolCallJson); err == nil {
+					fmt.Printf("Executing tool: %s\n", toolCallJson.Name)
+					
+					// Create a fake ToolCall to use existing logic
+					fakeToolCall := ToolCall{
+						ID:   "manual",
+						Type: "function",
+						Function: struct {
+							Name      string          `json:"name"`
+							Arguments json.RawMessage `json:"arguments"`
+						}{
+							Name:      toolCallJson.Name,
+							Arguments: toolCallJson.Arguments,
+						},
+					}
+					
+					result, err := e.callTool(fakeToolCall)
+					if err != nil {
+						result = fmt.Sprintf("Error: %v", err)
+					}
+
+					messages = append(messages, Message{
+						Role:    "tool",
+						Content: result,
+					})
+
+					fmt.Printf("Tool result: %s\n", result)
+					continue // Continue the loop to get next response
+				}
+			}
 		}
 
 		if len(resp.Message.ToolCalls) == 0 {
