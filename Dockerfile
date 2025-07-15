@@ -9,7 +9,18 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o wex .
 
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates git bash curl
+# Install basic tools and essential programming languages
+RUN apk --no-cache add ca-certificates git bash curl wget build-base \
+    python3 python3-dev py3-pip \
+    nodejs npm \
+    && ln -sf python3 /usr/bin/python
+
+# Install Rust (lightweight installation)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+
+# Set up environment variables
+ENV PATH="/root/.cargo/bin:$PATH"
+
 WORKDIR /root/
 
 COPY --from=builder /app/wex .
