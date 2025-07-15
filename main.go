@@ -278,6 +278,8 @@ func (e *Engine) sendChatRequest(messages []Message) (*ChatResponse, error) {
 		return nil, fmt.Errorf("failed to marshal request: %v", err)
 	}
 
+	fmt.Printf("DEBUG: Sending request to Ollama:\n%s\n", string(jsonBody))
+
 	resp, err := http.Post(e.ollamaURL+"/api/chat", "application/json", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %v", err)
