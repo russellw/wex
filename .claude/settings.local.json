@@ -4,7 +4,8 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(chmod:*)",
-      "Bash(docker build:*)"
+      "Bash(docker build:*)",
+      "Bash(go build:*)"
     ],
     "deny": []
   }

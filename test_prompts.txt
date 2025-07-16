@@ -1,2 +1,7 @@
-write a desk calculator in Rust
+write a sort program in Python
+the program should take two command line arguments being the names of the
+input and output files
+it should read the input file, sort the lines in alphabetical order and write
+the output file
+write the program and make up some data to test it
 
