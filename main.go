@@ -239,6 +239,84 @@ func (e *Engine) writeFile(args json.RawMessage) (string, error) {
 	return fmt.Sprintf("Successfully wrote to %s", params.Path), nil
 }
 
+func (e *Engine) extractToolCallsFromContent(content string) []ToolCall {
+	var toolCalls []ToolCall
+	
+	// Look for JSON code blocks containing tool calls
+	lines := strings.Split(content, "\n")
+	var jsonLines []string
+	inCodeBlock := false
+	
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		
+		// Check for start of JSON code block
+		if line == "```json" {
+			inCodeBlock = true
+			jsonLines = []string{}
+			continue
+		}
+		
+		// Check for end of code block
+		if line == "```" && inCodeBlock {
+			inCodeBlock = false
+			
+			// Try to parse the collected JSON
+			jsonStr := strings.Join(jsonLines, "\n")
+			var toolCallJson struct {
+				Name      string          `json:"name"`
+				Arguments json.RawMessage `json:"arguments"`
+			}
+			
+			if err := json.Unmarshal([]byte(jsonStr), &toolCallJson); err == nil {
+				toolCall := ToolCall{
+					ID:   fmt.Sprintf("extracted-%d", len(toolCalls)),
+					Type: "function",
+					Function: struct {
+						Name      string          `json:"name"`
+						Arguments json.RawMessage `json:"arguments"`
+					}{
+						Name:      toolCallJson.Name,
+						Arguments: toolCallJson.Arguments,
+					},
+				}
+				toolCalls = append(toolCalls, toolCall)
+			}
+			continue
+		}
+		
+		// Collect lines inside code block
+		if inCodeBlock {
+			jsonLines = append(jsonLines, line)
+		}
+	}
+	
+	// Fallback: try to parse the entire content as JSON if no code blocks found
+	if len(toolCalls) == 0 && strings.Contains(content, `"name":`) && strings.Contains(content, `"arguments":`) {
+		var toolCallJson struct {
+			Name      string          `json:"name"`
+			Arguments json.RawMessage `json:"arguments"`
+		}
+		
+		if err := json.Unmarshal([]byte(content), &toolCallJson); err == nil {
+			toolCall := ToolCall{
+				ID:   "fallback",
+				Type: "function",
+				Function: struct {
+					Name      string          `json:"name"`
+					Arguments json.RawMessage `json:"arguments"`
+				}{
+					Name:      toolCallJson.Name,
+					Arguments: toolCallJson.Arguments,
+				},
+			}
+			toolCalls = append(toolCalls, toolCall)
+		}
+	}
+	
+	return toolCalls
+}
+
 func (e *Engine) runCommand(args json.RawMessage) (string, error) {
 	var params struct {
 		Command string  `json:"command"`
@@ -323,31 +401,13 @@ func (e *Engine) ProcessRequest(userMessage string) error {
 		if resp.Message.Content != "" {
 			fmt.Printf("Assistant: %s\n", resp.Message.Content)
 			
-			// Check if content looks like a JSON tool call
-			if strings.Contains(resp.Message.Content, `"name":`) && strings.Contains(resp.Message.Content, `"arguments":`) {
-				// Try to parse as tool call JSON
-				var toolCallJson struct {
-					Name      string          `json:"name"`
-					Arguments json.RawMessage `json:"arguments"`
-				}
-				
-				if err := json.Unmarshal([]byte(resp.Message.Content), &toolCallJson); err == nil {
-					fmt.Printf("Executing tool: %s\n", toolCallJson.Name)
+			// Extract and execute tool calls from content
+			toolCalls := e.extractToolCallsFromContent(resp.Message.Content)
+			if len(toolCalls) > 0 {
+				for _, toolCall := range toolCalls {
+					fmt.Printf("Executing tool: %s\n", toolCall.Function.Name)
 					
-					// Create a fake ToolCall to use existing logic
-					fakeToolCall := ToolCall{
-						ID:   "manual",
-						Type: "function",
-						Function: struct {
-							Name      string          `json:"name"`
-							Arguments json.RawMessage `json:"arguments"`
-						}{
-							Name:      toolCallJson.Name,
-							Arguments: toolCallJson.Arguments,
-						},
-					}
-					
-					result, err := e.callTool(fakeToolCall)
+					result, err := e.callTool(toolCall)
 					if err != nil {
 						result = fmt.Sprintf("Error: %v", err)
 					}
@@ -358,8 +418,8 @@ func (e *Engine) ProcessRequest(userMessage string) error {
 					})
 
 					fmt.Printf("Tool result: %s\n", result)
-					continue // Continue the loop to get next response
 				}
+				continue // Continue the loop to get next response
 			}
 		}
 
