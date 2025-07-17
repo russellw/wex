@@ -9,4 +9,3 @@ if %errorlevel% neq 0 (
 
 echo Running Go tool call tester...
 test_tool_calls_go.exe --ollama-url http://192.168.0.63:11434 --model qwen2.5-coder:14b
-pause
