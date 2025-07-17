@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -616,6 +617,150 @@ func (t *LLMToolCallTester) runAllTests() map[string]TestResult {
 	return results
 }
 
+// saveResults saves test results to a file
+func (t *LLMToolCallTester) saveResults(results map[string]TestResult) error {
+	// Create results directory if it doesn't exist
+	resultsDir := "results"
+	if err := os.MkdirAll(resultsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create results directory: %v", err)
+	}
+
+	// Generate filename with sanitized model name
+	modelName := strings.ReplaceAll(t.Model, ":", "_")
+	modelName = strings.ReplaceAll(modelName, "/", "_")
+	filename := fmt.Sprintf("%s.md", modelName)
+	filepath := filepath.Join(resultsDir, filename)
+
+	// Create file
+	file, err := os.Create(filepath)
+	if err != nil {
+		return fmt.Errorf("failed to create results file: %v", err)
+	}
+	defer file.Close()
+
+	// Calculate summary statistics
+	totalTests := len(results)
+	passed := 0
+	failed := 0
+	partial := 0
+
+	for _, result := range results {
+		switch result.Result {
+		case TestStatusPass:
+			passed++
+		case TestStatusFail:
+			failed++
+		case TestStatusPartial:
+			partial++
+		}
+	}
+
+	// Write markdown content
+	fmt.Fprintf(file, "# LLM Tool Call Test Results\n\n")
+	fmt.Fprintf(file, "**Model:** %s  \n", t.Model)
+	fmt.Fprintf(file, "**Ollama URL:** %s  \n", t.OllamaURL)
+	fmt.Fprintf(file, "**Test Date:** %s  \n", time.Now().Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(file, "**Total Tests:** %d  \n", totalTests)
+	fmt.Fprintf(file, "**Passed:** ✅ %d  \n", passed)
+	fmt.Fprintf(file, "**Failed:** ❌ %d  \n", failed)
+	fmt.Fprintf(file, "**Partial:** ⚠️ %d  \n", partial)
+	fmt.Fprintf(file, "**Success Rate:** %.1f%%  \n\n", (float64(passed)/float64(totalTests))*100)
+
+	// Overall assessment
+	if passed == totalTests {
+		fmt.Fprintf(file, "## Overall Assessment\n\n🎉 **EXCELLENT**: This LLM has robust tool call support!\n\n")
+	} else if passed >= int(float64(totalTests)*0.8) {
+		fmt.Fprintf(file, "## Overall Assessment\n\n👍 **GOOD**: This LLM has solid tool call support with minor issues.\n\n")
+	} else if passed >= int(float64(totalTests)*0.5) {
+		fmt.Fprintf(file, "## Overall Assessment\n\n⚠️ **MODERATE**: This LLM has partial tool call support.\n\n")
+	} else {
+		fmt.Fprintf(file, "## Overall Assessment\n\n❌ **POOR**: This LLM has limited or broken tool call support.\n\n")
+	}
+
+	// Detailed results
+	fmt.Fprintf(file, "## Detailed Test Results\n\n")
+	
+	for _, testCase := range t.getTestCases() {
+		result, exists := results[testCase.Name]
+		if !exists {
+			continue
+		}
+
+		var statusEmoji string
+		switch result.Result {
+		case TestStatusPass:
+			statusEmoji = "✅"
+		case TestStatusFail:
+			statusEmoji = "❌"
+		case TestStatusPartial:
+			statusEmoji = "⚠️"
+		default:
+			statusEmoji = "❓"
+		}
+
+		fmt.Fprintf(file, "### %s %s\n\n", statusEmoji, testCase.Name)
+		fmt.Fprintf(file, "**Description:** %s  \n", testCase.Description)
+		fmt.Fprintf(file, "**Status:** %s  \n", result.Result)
+		fmt.Fprintf(file, "**Duration:** %.2fs  \n", result.Duration)
+		fmt.Fprintf(file, "**Tool Calls:** %d  \n", len(result.ToolCalls))
+		fmt.Fprintf(file, "**Success Criteria:** %s  \n\n", testCase.SuccessCriteria)
+
+		if len(result.ToolCalls) > 0 {
+			fmt.Fprintf(file, "**Tool Call Details:**\n")
+			for i, tc := range result.ToolCalls {
+				status := "✓"
+				if !tc.Success {
+					status = "✗"
+				}
+				fmt.Fprintf(file, "%d. %s `%s`", i+1, status, tc.ToolName)
+				
+				// Format arguments nicely
+				if len(tc.Arguments) > 0 {
+					argStr := ""
+					for k, v := range tc.Arguments {
+						if argStr != "" {
+							argStr += ", "
+						}
+						argStr += fmt.Sprintf("%s=%v", k, v)
+					}
+					fmt.Fprintf(file, "(%s)", argStr)
+				}
+				
+				if tc.Error != "" {
+					fmt.Fprintf(file, " - Error: %s", tc.Error)
+				}
+				fmt.Fprintf(file, "\n")
+			}
+			fmt.Fprintf(file, "\n")
+		}
+
+		if result.Notes != "" {
+			fmt.Fprintf(file, "**Notes:** %s  \n\n", result.Notes)
+		}
+
+		// Show user message and expected tools
+		fmt.Fprintf(file, "**Test Message:** %s  \n", testCase.UserMessage)
+		if len(testCase.ExpectedTools) > 0 {
+			fmt.Fprintf(file, "**Expected Tools:** %s  \n", strings.Join(testCase.ExpectedTools, ", "))
+		}
+		fmt.Fprintf(file, "\n---\n\n")
+	}
+
+	// JSON export section
+	fmt.Fprintf(file, "## Raw JSON Results\n\n")
+	fmt.Fprintf(file, "```json\n")
+	jsonData, err := json.MarshalIndent(results, "", "  ")
+	if err != nil {
+		fmt.Fprintf(file, "Error serializing results: %v\n", err)
+	} else {
+		fmt.Fprintf(file, "%s\n", jsonData)
+	}
+	fmt.Fprintf(file, "```\n")
+
+	fmt.Printf("📄 Results saved to: %s\n", filepath)
+	return nil
+}
+
 // printSummary prints a summary of test results
 func (t *LLMToolCallTester) printSummary(results map[string]TestResult) {
 	fmt.Println("\n" + strings.Repeat("=", 60))
@@ -709,6 +854,11 @@ func main() {
 
 	results := tester.runAllTests()
 	tester.printSummary(results)
+	
+	// Save results to file
+	if err := tester.saveResults(results); err != nil {
+		fmt.Printf("Warning: Failed to save results: %v\n", err)
+	}
 
 	// Exit with appropriate code
 	totalTests := len(results)
